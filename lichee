@@ -9,6 +9,10 @@ else
     PROJECT_ANDROID_DIR="${HOME}/work/android/lichee"
     SOMETHING_COPY_TO_ROOTFS="${HOME}/to_rootfs"
     V5_PROJECT_DIR="${HOME}/work/V5IPC/lichee"
+    echo "PROJECT_DIR=${PROJECT_DIR}" > ${HOME}/.licheerc
+    echo "SHARE_FOLDER=${SHARE_FOLDER}" >> ${HOME}/.licheerc
+    echo "PROJECT_DIR=${PROJECT_DIR}" >> ${HOME}/.licheerc
+    echo "SOMETHING_COPY_TO_ROOTFS=${SOMETHING_COPY_TO_ROOTFS}" >> ${HOME}/.licheerc
 fi
 
 cd ${PROJECT_DIR}
