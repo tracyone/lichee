@@ -5,12 +5,13 @@ if [[ -f "${HOME}/.licheerc" ]]; then
     . ${HOME}/.licheerc
 else
     PROJECT_DIR="${HOME}/work/lichee"
-    SHARE_FOLDER="${HOME}/work/share_folder/build_server"
+    SHARE_FOLDER="$(pwd)"
     PROJECT_ANDROID_DIR="${HOME}/work/android/lichee"
     SOMETHING_COPY_TO_ROOTFS="${HOME}/to_rootfs"
     V5_PROJECT_DIR="${HOME}/work/V5IPC/lichee"
     echo "PROJECT_DIR=${PROJECT_DIR}" > ${HOME}/.licheerc
-    echo "SHARE_FOLDER=${SHARE_FOLDER}" >> ${HOME}/.licheerc
+    echo 'SHARE_FOLDER=$(pwd)' >> ${HOME}/.licheerc
+    echo "PROJECT_ANDROID_DIR=${PROJECT_ANDROID_DIR}" >> ${HOME}/.licheerc
     echo "PROJECT_DIR=${PROJECT_DIR}" >> ${HOME}/.licheerc
     echo "SOMETHING_COPY_TO_ROOTFS=${SOMETHING_COPY_TO_ROOTFS}" >> ${HOME}/.licheerc
 fi
@@ -19,6 +20,10 @@ fi
 if [[ ! -d ${PROJECT_DIR} ]]; then
     echo -e "${PROJECT_DIR} is not exist!\n"
     echo -e "Please modify ${HOME}/.licheerc!\n"
+    echo -e "Openning ${HOME}/.licheerc ....\n"
+    sleep 2
+    vim ${HOME}/.licheerc
+    echo -e "Please rerun lichee!\n"
     exit 1
 fi
 
@@ -392,8 +397,6 @@ function lichee_pack()
         ${copy_cmd} ${PROJECT_DIR}/tools/pack/*.img \
             ${SHARE_FOLDER} || Exit 6
 	else
-        cd ${PROJECT_DIR}
-        ./build.sh ${PACK_STRING} || Exit 4
         echo "Copy firmware file to ${SHARE_FOLDER} ..."
         card_uart=""
         secure=""
@@ -404,8 +407,13 @@ function lichee_pack()
         fi
         if [[ ${PACK_STRING} =~ .*secure.* ]]; then
             secure="_*secure*"
+            cd ${PROJECT_DIR}/tools/pack/
+            ./createkeys -c ${chip}
         fi
+        cd ${PROJECT_DIR}
+        ./build.sh ${PACK_STRING} || Exit 4
         name=$(find  ${PROJECT_DIR}/tools/pack/ -maxdepth 1 -name ${chip}_${platform}_${board}_${card_uart}${secure}.img)
+
         if [[ ! -f ${name} ]]; then
             echo -e "$name is not exist!!${card_uart} ${secure}"
         fi
