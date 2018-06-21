@@ -1,0 +1,563 @@
+#!/bin/bash
+# author:zhengxiaobin@allwinnertech.com
+
+if [[ -f "${HOME}/.licheerc" ]]; then
+    . ${HOME}/.licheerc
+else
+    PROJECT_DIR="${HOME}/work/lichee"
+    SHARE_FOLDER="${HOME}/work/share_folder/build_server"
+    PROJECT_ANDROID_DIR="${HOME}/work/android/lichee"
+    SOMETHING_COPY_TO_ROOTFS="${HOME}/to_rootfs"
+    V5_PROJECT_DIR="${HOME}/work/V5IPC/lichee"
+fi
+
+cd ${PROJECT_DIR}
+
+if [[ $? -ne 0 ]]; then
+    echo -e "${PROJECT_DIR} is not exist!\n"
+    exit 1
+fi
+
+# fun_name:Exit
+# argument:
+function Exit()
+{
+   export PACK_BSPTEST=false
+   if [[ $1 -ne 0 ]]; then
+       echo -e "\nSomething is wrong in:\n"
+       echo -e "\nLine:${BASH_LINENO[1]}, Function:${FUNCNAME[1]}\n"
+       echo -e "\nExit with $1\n"
+   fi
+   exit $1
+}
+
+if [[ -f "./buildroot/scripts/shflags/shflags" ]]; then
+	. ./buildroot/scripts/shflags/shflags
+elif [[ -f "./tools/build/shflags" ]]; then 
+	. ./tools/build/shflags
+else
+	echo -e "shflags library is not exist!";Exit 3
+fi
+
+# define option, format:
+#   'long option' 'default value' 'help message' 'short option'
+DEFINE_string 'build' 'all' 'build lichee then pack' 'b'
+DEFINE_string 'config' '' 'linux config' 'c'
+DEFINE_string 'project' '' 'project' 'p'
+DEFINE_string 'root' '' 'project root' 'r'
+DEFINE_string 'pack' '' 'pack option' 'k'
+DEFINE_string 'ucfg' '' 'specified uboot config' 'u'
+DEFINE_string 'edit' '' 'edit script' 'e'
+
+
+FLAGS_HELP="build lichee
+Usage:
+    lichee [-b all|kernel|uboot|pack|info|clean|menu|dts] 
+           [ -c s|m] [-p a|v] [-r project path]
+-b
+    kernel     :build kernel then pack
+     uboot     :build uboot then pack
+      pack     :pack
+      info     :show config info
+     clean     :clear then reconfig
+      menu     :config kernel config
+       dts     :open sys_config.fex and dts files using vim editor
+
+-c 
+       s : build witch standby config
+       m : build witch min config
+
+-p
+       a : android project
+       v : v5 project
+
+-r  specified the root path of project
+
+-k
+       s : pack with secure firmware
+       d : pack with card0 debug
+       c : card boot
+"
+
+# parse the command-line
+FLAGS "$@" || exit $?
+eval set -- "${FLAGS_ARGV}"
+
+action=${FLAGS_build}
+lconfig=${FLAGS_config}
+project=${FLAGS_project}
+root=${FLAGS_root}
+pack=${FLAGS_pack}
+ucfg=${FLAGS_ucfg}
+edit=${FLAGS_edit}
+
+case ${edit} in
+    'e' )
+        vim -p $0 ${HOME}/.licheerc
+        Exit 0
+        ;;
+    * )
+        ;;
+esac
+
+
+case ${lconfig} in
+    '' )
+        CONFIG=""
+        ;;
+    'a' )
+        CONFIG="android_"
+        ;;
+    's' )
+        CONFIG="standby_"
+        ;;
+    'm' )
+        CONFIG="min_"
+        ;;
+    * )
+        flags_help
+        Exit 3
+        ;;
+esac
+
+
+case ${project} in
+    '' )
+        ;;
+    'a' )
+        CONFIG="android_"
+        PROJECT_DIR=${PROJECT_ANDROID_DIR}
+        ;;
+    'v' )
+        PROJECT_DIR=${V5_PROJECT_DIR}
+        ;;
+    * )
+        flags_help
+        Exit 3
+        ;;
+esac
+
+UBOOT_CFG=0
+case ${ucfg} in
+    '' )
+        UBOOT_CFG=0
+        ;;
+    * )
+        UBOOT_CFG=1
+        ;;
+esac
+
+if [[ ! -z ${root} ]]; then
+    PROJECT_DIR=${root}
+    PROJECT_ANDROID_DIR=${root}
+    V5_PROJECT_DIR=${root}
+fi
+
+export PACK_BSPTEST=false
+PACK_STRING="pack"
+PACK_CARD=false
+
+patten=\\b[sdc]\+\\b
+if [[ ${pack} =~ ${patten} ]]; then
+    if [[ ${pack} =~ .*t.* ]]; then
+        export PACK_BSPTEST=true
+    fi
+    if [[ ${pack} =~ .*d.* ]]; then
+        PACK_STRING+="_debug"
+    fi
+    if [[ ${pack} =~ .*s.* ]]; then
+        PACK_STRING+="_secure"
+    fi
+    if [[ ${pack} =~ .*c.* ]]; then
+        PACK_CARD=true
+        LICHEE_ROOTFS_DEF="${PROJECT_DIR}/${linux_ver}/skel"
+    fi
+fi
+
+
+stty erase ^H
+
+# fun_name:
+# argument:
+function build_v5_project()
+{
+    v5_envsetup
+    cd ${PROJECT_DIR}
+}
+
+# build_config:
+# argument:none
+function build_config()
+{
+	path=$1
+	cd ${path}
+	if [[ -f .buildconfig ]]; then
+		chip=$(cat .buildconfig | grep -oP '(?<=LICHEE_CHIP=)[^$]*')
+		linux_ver=$(cat .buildconfig | grep -oP '(?<=LICHEE_KERN_VER=)[^$]*')
+		arch=$(cat .buildconfig | grep -oP '(?<=LICHEE_ARCH=)[^$]*')
+		board=$(cat .buildconfig | grep -oP '(?<=LICHEE_BOARD=)[^$]*')
+		platform=$(cat .buildconfig | grep -oP '(?<=LICHEE_PLATFORM=)[^$]*')
+	else
+        if [[ ${project} == 'v' ]]; then
+            v5_envsetup
+            mklichee
+        else
+            ./build.sh config
+        fi
+		if [[ $? -ne 0 ]]; then
+			echo -e "Config failed\n"
+			Exit 2
+		else
+			chip=$(cat .buildconfig | grep -oP '(?<=LICHEE_CHIP=)[^$]*')
+			linux_ver=$(cat .buildconfig | grep -oP '(?<=LICHEE_KERN_VER=)[^$]*')
+			arch=$(cat .buildconfig | grep -oP '(?<=LICHEE_ARCH=)[^$]*')
+			board=$(cat .buildconfig | grep -oP '(?<=LICHEE_BOARD=)[^$]*')
+			platform=$(cat .buildconfig | grep -oP '(?<=LICHEE_PLATFORM=)[^$]*')
+		fi
+	fi
+
+	if [[  ${chip} == "" || ${linux_ver} == "" || ${arch} == ""  ]]; then
+		echo -e "Read .buildconfig failed\n"
+		Exit 3
+	fi
+    #if [[ ${linux_ver} == 'linux-4.4' ]]; then
+        #LICHEE_PLAT_OUT="${PROJECT_DIR}/out/${chip}-linaro-5.3/${platform}/common"
+    #else
+    LICHEE_PLAT_OUT="${PROJECT_DIR}/out/${chip}/${platform}/common"
+    #LICHEE_BR_OUT="${LICHEE_PLAT_OUT}/rootfs_def/"
+    LICHEE_BR_OUT="${LICHEE_PLAT_OUT}/buildroot/target/"
+    LICHEE_ROOTFS_DEF="${LICHEE_PLAT_OUT}/rootfs_def/"
+    if [[ ${pack} =~ .*c.* ]]; then
+        LICHEE_ROOTFS_DEF="${PROJECT_DIR}/${linux_ver}/skel"
+    fi
+    #echo "alias cdlinux='cd ${PROJECT_DIR}/${linux_ver}'" > ${PROJECT_DIR}/.alias
+    #source ${PROJECT_DIR}/.alias
+}
+
+
+# copy_kernel_config:
+# argument:none
+function copy_kernel_config()
+{
+	cd ${PROJECT_DIR}
+	if [[ ${chip} != "" && ${linux_ver} != "" && ${arch} != "" ]]; then
+		if [[ ${platform} == 'android' ]]; then
+            android_config_cnt=$(find  ${linux_ver}/arch/${arch}/configs/ -maxdepth 1 -name ${chip}smp_android*defconfig | wc -l)
+            tmp_src_file=$(find  ${linux_ver}/arch/${arch}/configs/ -maxdepth 1 -name ${chip}smp_android*defconfig)
+            if [[ $android_config_cnt -eq 1 ]]; then
+                src_file=$tmp_src_file
+            else
+                i=0
+                for src in ${tmp_src_file} ; do
+                    echo -e "$i. $src"
+                    i=`expr $i + 1`
+                done
+                read -n1 -p "Which config do you want?" ans
+                i=0
+                for src in ${tmp_src_file} ; do
+                    if [[ $ans == $i ]]; then
+                        src_file=$src
+                        break;
+                    fi
+                    i=`expr $i + 1`
+                done
+            fi
+		else
+			src_file=${linux_ver}/arch/${arch}/configs/${chip}smp_${CONFIG}defconfig
+		fi
+		dst_file=${linux_ver}/.config
+		if [[ -f ${dst_file} ]]; then
+			if [[ $(sha256sum ${src_file}) == $(sha256sum ${dst_file}) ]]; then
+				echo -e "config file is same, return."
+				return 
+			fi
+		fi
+		echo -e "cp ${src_file} ${linux_ver}/.config\n"
+		cp ${src_file} ${dst_file}  || Exit 4
+	else
+		Exit 5
+	fi
+}
+
+# build_uboot:
+# argument:none
+function build_uboot()
+{
+	cd ${PROJECT_DIR}/brandy
+	echo -e "Build uboot for ${chip}"
+    if [[ ${UBOOT_CFG} -eq 1 ]]; then
+        cd u-boot-2014.07
+        echo "make ${ucfg} $(pwd)"
+        make ${ucfg} || Exit 1
+        make fes
+        make boot0
+        make -j16 || Exit 4
+    else
+        ./build.sh -p ${chip} || Exit 2
+    fi
+	cd ${PROJECT_DIR}
+}
+
+# fun_name:copy_file_to_rootfs
+# argument:
+function copy_file_to_rootfs()
+{
+    if [[ ${ucfg} =~ .*_nor_config ]]; then
+        return
+    fi
+	cd ${PROJECT_DIR}
+    if [[ -d ${SOMETHING_COPY_TO_ROOTFS} ]]; then
+        mkdir -p ${LICHEE_BR_OUT}/ || Exit 3
+        mkdir -p ${LICHEE_ROOTFS_DEF}/ || Exit 3
+        echo -e "rm -rf ${LICHEE_BR_OUT}/$(basename ${SOMETHING_COPY_TO_ROOTFS})"
+        rm -rf ${LICHEE_BR_OUT}/$(basename ${SOMETHING_COPY_TO_ROOTFS})
+        rm -rf ${LICHEE_ROOTFS_DEF}/$(basename ${SOMETHING_COPY_TO_ROOTFS})
+        echo -e "Copying ${SOMETHING_COPY_TO_ROOTFS} ..."
+        cp -a ${SOMETHING_COPY_TO_ROOTFS} ${LICHEE_BR_OUT}/ || Exit 3
+        cp -a ${SOMETHING_COPY_TO_ROOTFS} ${LICHEE_ROOTFS_DEF}/ || Exit 3
+    else
+        echo -e "${SOMETHING_COPY_TO_ROOTFS} is not exist!\n"
+    fi
+    cd -
+}
+
+# fun_name:modify_rootfs
+# argument:
+function modify_rootfs()
+{
+    if [[ ${PACK_CARD} != "true" ]]; then
+        return 0
+    fi
+    cd ${PROJECT_DIR}/${linux_ver}
+    ./scripts/build_rootfs.sh $1 $2
+    cd -
+}
+
+# build_kernel:
+# argument:none
+function build_kernel()
+{
+	cd ${PROJECT_DIR}
+	copy_kernel_config
+	cd ${PROJECT_DIR}/${linux_ver}
+    echo -e "Extract default rootfs\n"
+    if [[ ! -d "skel" ]]; then
+        if [[ ${arch} == "arm64" ]]; then
+            modify_rootfs e rootfs.cpio.gz
+            copy_file_to_rootfs
+            modify_rootfs c rootfs.cpio.gz
+        else
+            modify_rootfs e rootfs_32bit.cpio.gz
+            copy_file_to_rootfs
+            modify_rootfs c rootfs_32bit.cpio.gz
+        fi
+    else
+        if [[ ${arch} == "arm64" ]]; then
+            copy_file_to_rootfs
+            modify_rootfs c rootfs.cpio.gz
+        else
+            copy_file_to_rootfs
+            modify_rootfs c rootfs_32bit.cpio.gz
+        fi
+    fi
+	cd ${PROJECT_DIR}
+    ./build.sh || Exit 3
+}
+
+function config_kernel()
+{
+	cd ${PROJECT_DIR}/${linux_ver}
+	make ARCH=${arch} menuconfig
+	cd ${PROJECT_DIR}
+	echo "Override config: $src_file"
+    cp ${linux_ver}/.config $src_file || Exit 3
+}
+
+# lichee_pack:
+# argument:none
+function lichee_pack()
+{
+    copy_cmd="mv"
+	if [[ ${platform} == 'android' ]]; then
+        cd ${PROJECT_DIR}/../android
+        rm ${PROJECT_DIR}/tools/pack/*.img
+		pack -${pack}
+        echo "Copy firmware file to ${SHARE_FOLDER} ..."
+        ${copy_cmd} ${PROJECT_DIR}/tools/pack/*.img \
+            ${SHARE_FOLDER} || Exit 6
+	else
+        cd ${PROJECT_DIR}
+        ./build.sh ${PACK_STRING} || Exit 4
+        echo "Copy firmware file to ${SHARE_FOLDER} ..."
+        card_uart=""
+        secure=""
+        if [[ ${PACK_STRING} =~ .*debug.* ]]; then
+            card_uart="card0"
+        else
+            card_uart="uart0"
+        fi
+        if [[ ${PACK_STRING} =~ .*secure.* ]]; then
+            secure="_*secure*"
+        fi
+        name=$(find  ${PROJECT_DIR}/tools/pack/ -maxdepth 1 -name ${chip}_${platform}_${board}_${card_uart}${secure}.img)
+        if [[ ! -f ${name} ]]; then
+            echo -e "$name is not exist!!${card_uart} ${secure}"
+        fi
+        if [[ ${SHARE_FOLDER} =~ $(whoami)@.* ]]; then
+            copy_cmd="scp"
+        fi
+        ${copy_cmd} ${name} ${SHARE_FOLDER} || Exit 6
+        if [[ ${copy_cmd} == "scp" ]]; then
+            rm ${name}
+        fi
+	fi
+}
+
+# show_info:
+# argument:none
+function show_info()
+{
+echo "
+    info =======================================
+	project                  :${PROJECT_DIR}
+	chip                     :${chip}
+	linux version            :${linux_ver}
+	arch                     :${arch}
+	platform                 :${platform}
+	board                    :${board}
+	pack                     :${PACK_STRING}
+	pack_bsptest             :${PACK_BSPTEST}
+	something_copy_to_rootfs :${SOMETHING_COPY_TO_ROOTFS}
+	LICHEE_BR_OUT            :${LICHEE_BR_OUT}
+	LICHEE_ROOTFS_DEF        :${LICHEE_ROOTFS_DEF}
+    Info ========================================
+"
+}
+
+function android_envsetup()
+{
+	cd ${PROJECT_DIR}
+	cd ../android
+	source ./build/envsetup.sh || Exit 2
+    lunch || Exit 8
+}
+
+function v5_envsetup()
+{
+	cd ${PROJECT_DIR}/../V5IPC/IPCLinuxPlatform
+	source ./build/v5_envsetup_sdv.sh || Exit 2
+}
+
+# build_android:
+# argument:
+function build_android()
+{
+    android_envsetup
+	cd ${PROJECT_DIR}/../android
+    extract-bsp || Exit 3
+    make -j8 || Exit 4
+}
+
+case ${action} in
+	'all' )
+		build_config ${PROJECT_DIR}
+		show_info
+		build_uboot
+		build_kernel
+		if [[ ${platform} == 'android' ]]; then
+			build_android
+		fi
+        if [[ ${project} == 'v' ]]; then
+            build_v5_project
+        fi
+		lichee_pack
+		Exit 0
+		;;
+	'kernel' )
+		build_config ${PROJECT_DIR}
+		show_info
+		build_kernel
+		if [[ ${platform} == 'android' ]]; then
+			build_android
+		fi
+        if [[ ${project} == 'v' ]]; then
+            build_v5_project
+        fi
+		lichee_pack
+		Exit 0
+		;;
+	'uboot' )
+		build_config ${PROJECT_DIR}
+		show_info
+		build_uboot
+		if [[ ${platform} == 'android' ]]; then
+			build_android
+		fi
+        if [[ ${project} == 'v' ]]; then
+            build_v5_project
+        fi
+		lichee_pack
+		Exit 0
+		;;
+	'android' )
+		build_config ${PROJECT_DIR}
+		show_info
+		if [[ ${platform} == 'android' ]]; then
+			build_android
+		fi
+		lichee_pack
+		Exit 0
+		;;
+	'pack' )
+		build_config ${PROJECT_DIR}
+		show_info
+		if [[ ${platform} == 'android' ]]; then
+			android_envsetup
+		fi	
+        if [[ ${project} == 'v' ]]; then
+           v5_envsetup 
+        fi
+		lichee_pack
+		Exit 0
+		;;
+	'info' )
+		build_config ${PROJECT_DIR}
+		show_info
+		;;
+	'clean' )
+		echo -e "rm ${PROJECT_DIR}/.buildconfig\n"
+		cd ${PROJECT_DIR}
+		rm .buildconfig 
+		build_config ${PROJECT_DIR}
+		show_info
+		;;
+	'menu' )
+		build_config ${PROJECT_DIR}
+		copy_kernel_config
+		config_kernel
+		;;
+	'dts' )
+		build_config ${PROJECT_DIR}
+        dts_files+="${PROJECT_DIR}/tools/pack/chips/${chip}/configs/${board}/sys_config.fex "
+
+        if [[ ( ${linux_ver} == "linux-4.4" || ${linux_ver} == "linux-4.9" ) && ${arch} == "arm64" ]]; then
+            dts_files+="${PROJECT_DIR}/${linux_ver}/arch/${arch}/boot/dts/sunxi/${chip}.dtsi "
+            dts_files+="${PROJECT_DIR}/${linux_ver}/arch/${arch}/boot/dts/sunxi/${chip}-clk.dtsi "
+            dts_files+="${PROJECT_DIR}/${linux_ver}/arch/${arch}/boot/dts/sunxi/${chip}-pinctrl.dtsi "
+        else
+            dts_files+="${PROJECT_DIR}/${linux_ver}/arch/${arch}/boot/dts/${chip}.dtsi "
+            dts_files+="${PROJECT_DIR}/${linux_ver}/arch/${arch}/boot/dts/${chip}-clk.dtsi "
+            dts_files+="${PROJECT_DIR}/${linux_ver}/arch/${arch}/boot/dts/${chip}-pinctrl.dtsi "
+        fi
+		vim -p  ${dts_files}
+		;;
+	* )
+		flags_help
+		Exit 3
+		;;
+esac
+export PACK_BSPTEST=false
+echo -e "\nAll done\n"
+Exit 0
+stty erase ^?
+
