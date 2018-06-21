@@ -555,7 +555,9 @@ case ${action} in
             dts_files+="${PROJECT_DIR}/${linux_ver}/arch/${arch}/boot/dts/${chip}-clk.dtsi "
             dts_files+="${PROJECT_DIR}/${linux_ver}/arch/${arch}/boot/dts/${chip}-pinctrl.dtsi "
         fi
-		vim -p  ${dts_files}
+        dts_files+="${PROJECT_DIR}/brandy/u-boot-2014.07/include/configs/${chip}.h "
+        dts_files+="${PROJECT_DIR}/brandy/u-boot-2011.09/include/configs/${chip}.h "
+        vim -p  ${dts_files}
 		;;
 	* )
 		flags_help
