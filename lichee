@@ -1,5 +1,5 @@
 #!/bin/bash
-# author:zhengxiaobin@allwinnertech.com
+# author:tracyone@live.cn
 
 if [[ -f "${HOME}/.licheerc" ]]; then
     . ${HOME}/.licheerc
@@ -15,12 +15,14 @@ else
     echo "SOMETHING_COPY_TO_ROOTFS=${SOMETHING_COPY_TO_ROOTFS}" >> ${HOME}/.licheerc
 fi
 
-cd ${PROJECT_DIR}
 
-if [[ $? -ne 0 ]]; then
+if [[ ! -d ${PROJECT_DIR} ]]; then
     echo -e "${PROJECT_DIR} is not exist!\n"
+    echo -e "Please modify ${HOME}/.licheerc!\n"
     exit 1
 fi
+
+cd ${PROJECT_DIR}
 
 # fun_name:Exit
 # argument:
